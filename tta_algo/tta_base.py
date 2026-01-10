@@ -1,18 +1,21 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from utils.sam_optimizer import SAM
+from utils.util import Normalize
 
 
 class TTA_BASE(nn.Module):
     def __init__(self, cfg, model):
         super().__init__()
         self.cfg = cfg
-        self.model = self.configure_model(model)
+        device = torch.device("cuda:{:d}".format(cfg.BASE.GPU_ID) if torch.cuda.is_available() else "cpu")
+        self.model = self.configure_model(model,device)
         params, param_names = self.collect_params(self.model)
         if len(param_names) != 0:
             self.optimizer = self.setup_optimizer(params,cfg)
         self.steps = self.cfg.OPTIM.STEPS
-    
+        self.normalize = Normalize(device, cfg.CORRUPTION.DATASET)
 
     def forward(self, x):
         for _ in range(self.steps):
@@ -42,14 +45,33 @@ class TTA_BASE(nn.Module):
     @staticmethod
     def setup_optimizer(params,cfg):
 
-        lr_adapt = cfg.OPTIM.LR_ADAPT 
+        lr_adapt = cfg.OPTIM.LR 
+        
         if cfg.OPTIM.METHOD == 'Adam':
-            return optim.Adam(params,
+            if cfg.TTA.NAME in ['sar', 'sotta']:
+                return SAM(params,
+                           optim.Adam,
+                           rho = 0.05,
+                           lr = lr_adapt,
+                           weight_decay = cfg.OPTIM.WD
+                           )
+            else:
+                return optim.Adam(params,
                         lr=lr_adapt,
                         betas=(cfg.OPTIM.BETA, 0.999),
                         weight_decay=cfg.OPTIM.WD)
+            
         elif cfg.OPTIM.METHOD == 'SGD':
-            return optim.SGD(params,
+            if cfg.TTA.NAME in ['sar', 'sotta']:
+                return SAM(params,
+                           optim.SGD,
+                           rho = 0.05,
+                           lr = lr_adapt,
+                           weight_decay = cfg.OPTIM.WD
+                           )
+            else:
+
+                return optim.SGD(params,
                     lr=lr_adapt,
                     momentum=cfg.OPTIM.MOMENTUM,
                     dampening=cfg.OPTIM.DAMPENING,

@@ -1,77 +1,54 @@
-from tta_algo.tta_base import TTA_BASE
-import functools
 import torch
+import numpy as np
 import torch.nn as nn
-#from config.conf import cfg
-from utils.loss_functions import *
+from tta_algo.tta_base import TTA_BASE
+from utils.loss_functions import softmax_entropy
 from utils.bn_layers import *
-#device = torch.device("cuda:{:d}".format(cfg.BASE.GPU_ID) if torch.cuda.is_available() else "cpu")
 
-class TENT(TTA_BASE):
 
+class SAR(TTA_BASE):
     def __init__(self, cfg, model):
-        super(TENT, self).__init__(cfg, model)
-
+        super(SAR, self).__init__(cfg,model)
+        self.cfg = cfg
+        self.ema = None
+    
     def forward_and_adapt(self, data_batch, model, optimizer):
-
+        self.optimizer.zero_grad()
         outputs = model(self.normalize(data_batch))
-       
-        loss = softmax_entropy(outputs).mean(0)
+
+        entropys = softmax_entropy(outputs)
+        filter_ids_1 = torch.where(entropys < self.cfg.TTA.SAR.MARGIN_E0)
+        entropys = entropys[filter_ids_1]
+        loss = entropys.mean(0)
         loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+
+        optimizer.first_step(zero_grad = True)
+        entropys2 = softmax_entropy(model(self.normalize(data_batch)))
+        entropys2 = entropys2[filter_ids_1]
+        #loss_second_value = entropys2.clone().detach().mean(0)
+        filter_ids_2 = torch.where(entropys2 < self.cfg.TTA.SAR.MARGIN_E0)
+        loss_second = entropys2[filter_ids_2].mean(0)
+        if not np.isnan(loss_second.item()):
+            self.ema = update_ema(self.ema, loss_second.item())
+        
+        loss_second.backward()
+        optimizer.second_step(zero_grad = True)
+
         with torch.no_grad():
             outputs = model(self.normalize(data_batch))
+
         return outputs
-        
-
-
-    def configure_model(self, model,device):
-        
-        # print(f'The model is in {"train" if model.training else "eval"} mode')
-        # for param in model.parameters():
-        #     param.requires_grad = False
+    
+    def configure_model(self, model, device):
         model = model.train()
         model.requires_grad_(False)
-        # normlayer_names = []
-        
-        # if self.cfg.DIA.MED:
-            # for name, sub_module in model.named_modules():
-            #     if isinstance(sub_module, nn.BatchNorm2d):
-            #         normlayer_names.append(name)
 
-            # for name in normlayer_names:
-            #     bn_layer = self.get_named_submodule(model, name)
-
-            #     if isinstance(bn_layer, nn.BatchNorm2d):
-            #         # norm_layer = BatchNorm(num_features=bn_layer.num_features,
-            #         #                      affine=True, track_running_stats=False,
-            #         #                      use_tracked_mean=False,
-            #         #                      use_tracked_var=False)
-            #         norm_layer = MedBN2d(bn_layer, momentum = 1)
-                    
-            #     else:
-            #         raise RuntimeError()
-
-            #     # momentum_bn = NewBN(num_features=bn_layer.num_features,
-            #     #                     momentum=bn_layer.momentum,
-            #     #                     )
-            #     # norm_layer.weight.requires_grad_(True)
-            #     # norm_layer.bias.requires_grad_(True)
-            #     # norm_layer = NewBN(bn_layer, momentum = 1)
-            #     norm_layer.weight.requires_grad_(True)
-            #     norm_layer.bias.requires_grad_(True)
-            #     #norm_layer.training = True
-            #     self.set_named_submodule(model, name, norm_layer)
-
-      
-        for module in model.modules():
-            if isinstance(module, nn.BatchNorm2d) or isinstance(module,nn.LayerNorm):
-                module.track_running_stats = False
-                # module.running_mean = None
-                # module.running_var = None
-                module.weight.requires_grad_(True)
-                module.bias.requires_grad_(True)
+        for m in model.modules():
+            if isinstance(m , nn.BatchNorm2d) or isinstance(m,nn.LayerNorm):
+                m.requires_grad_(True)
+                m.track_running_stats = False
+                m.running_mean = None
+                m.running_var = None
         model = model.to(device)
         return model
     
@@ -104,6 +81,9 @@ class TENT(TTA_BASE):
             norm_layer.bias.requires_grad_(True)
                 #norm_layer.training = True
             self.set_named_submodule(self.model, name, norm_layer)
+        params, param_names = self.collect_params(self.model)
+        if len(param_names) != 0:
+            self.optimizer = self.setup_optimizer(params,self.cfg)
 
     def revert_bn(self):
         normlayer_names = []
@@ -134,7 +114,9 @@ class TENT(TTA_BASE):
             norm_layer.bias.requires_grad_(True)
                 #norm_layer.training = True
             self.set_named_submodule(self.model, name, norm_layer)
-
+        params, param_names = self.collect_params(self.model)
+        if len(param_names) != 0:
+            self.optimizer = self.setup_optimizer(params,self.cfg)
     
     @staticmethod
     def get_named_submodule(model, sub_name):
@@ -158,6 +140,9 @@ class TENT(TTA_BASE):
                 setattr(module, names[i], value)
 
 
-
-        
-        
+def update_ema(ema, new_data):
+    if ema is None:
+        return new_data
+    else:
+        with torch.no_grad():
+            return 0.9 * ema + (1 - 0.9) * new_data

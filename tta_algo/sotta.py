@@ -1,70 +1,67 @@
-from tta_algo.tta_base import TTA_BASE
-import functools
 import torch
 import torch.nn as nn
-#from config.conf import cfg
-from utils.loss_functions import *
+from tta_algo.tta_base import TTA_BASE
+from utils.memory import HUS
 from utils.bn_layers import *
-#device = torch.device("cuda:{:d}".format(cfg.BASE.GPU_ID) if torch.cuda.is_available() else "cpu")
 
-class TENT(TTA_BASE):
-
+class SoTTA(TTA_BASE):
     def __init__(self, cfg, model):
-        super(TENT, self).__init__(cfg, model)
+        self.cfg = cfg
+        super(SoTTA, self).__init__(cfg, model)
+        self.mem = HUS( capacity = cfg.TTA.SoTTA.MEM_SIZE,
+                       num_class = cfg.DATA.NUM_CLASSES,
+                       threshold= cfg.TTA.SoTTA.THRESH
+                       )
+        self.mem_state = self.mem.save_state_dict() # TODO: Put it inside the data loop
 
+    @torch.enable_grad    
     def forward_and_adapt(self, data_batch, model, optimizer):
-
-        outputs = model(self.normalize(data_batch))
-       
-        loss = softmax_entropy(outputs).mean(0)
-        loss.backward()
-        optimizer.step()
+        prev_mem_state = self.mem.save_state_dict()
+        self.construct_memory(data_batch, model)
+        mem_state = self.mem.save_state_dict()
+        feats, _ , _ = self.mem.get_memory()
+        if len(feats) == 0:
+            print("No data is available in memory")
+        filtered_x = torch.stack(feats)
+        outputs = model(self.normalize(filtered_x))
+        loss = -(outputs.softmax(1) * outputs.log_softmax(1)).sum(1)
+        loss = loss.mean()
         optimizer.zero_grad()
+        loss.backward()
+        optimizer.first_step(zero_grad = True)
+
+        outputs = model(self.normalize(filtered_x))
+        second_loss = (
+            -(outputs.softmax(1) * outputs.log_softmax(1)).sum(1).mean()
+        )
+        second_loss.backward()
+        optimizer.second_step(zero_grad=True)
+
         with torch.no_grad():
             outputs = model(self.normalize(data_batch))
         return outputs
         
+    def construct_memory(self, data_batch, model):
+        domain = 0 # domain information is not relevant here
+        training = model.training
+        with torch.no_grad():
+            model.eval()
+            logits = model(self.normalize(data_batch))
+            pseudo_cls = logits.max(dim=1, keepdim=False)[1].detach().cpu()
+            pseudo_conf = (
+                    nn.functional.softmax(logits, dim=1).max(1, keepdim=False)[0].detach().cpu()
+                    )
+            
+            for i,x in enumerate(data_batch):
+                self.mem.add_instance([x, pseudo_cls[i], domain, pseudo_conf[i]])
+        if training:
+            model.train()
 
-
-    def configure_model(self, model,device):
+    def configure_model(self, model, device):
         
-        # print(f'The model is in {"train" if model.training else "eval"} mode')
-        # for param in model.parameters():
-        #     param.requires_grad = False
-        model = model.train()
-        model.requires_grad_(False)
-        # normlayer_names = []
+        for param in model.parameters():
+            param.requires_grad = False
         
-        # if self.cfg.DIA.MED:
-            # for name, sub_module in model.named_modules():
-            #     if isinstance(sub_module, nn.BatchNorm2d):
-            #         normlayer_names.append(name)
-
-            # for name in normlayer_names:
-            #     bn_layer = self.get_named_submodule(model, name)
-
-            #     if isinstance(bn_layer, nn.BatchNorm2d):
-            #         # norm_layer = BatchNorm(num_features=bn_layer.num_features,
-            #         #                      affine=True, track_running_stats=False,
-            #         #                      use_tracked_mean=False,
-            #         #                      use_tracked_var=False)
-            #         norm_layer = MedBN2d(bn_layer, momentum = 1)
-                    
-            #     else:
-            #         raise RuntimeError()
-
-            #     # momentum_bn = NewBN(num_features=bn_layer.num_features,
-            #     #                     momentum=bn_layer.momentum,
-            #     #                     )
-            #     # norm_layer.weight.requires_grad_(True)
-            #     # norm_layer.bias.requires_grad_(True)
-            #     # norm_layer = NewBN(bn_layer, momentum = 1)
-            #     norm_layer.weight.requires_grad_(True)
-            #     norm_layer.bias.requires_grad_(True)
-            #     #norm_layer.training = True
-            #     self.set_named_submodule(model, name, norm_layer)
-
-      
         for module in model.modules():
             if isinstance(module, nn.BatchNorm2d) or isinstance(module,nn.LayerNorm):
                 module.track_running_stats = False
@@ -104,6 +101,9 @@ class TENT(TTA_BASE):
             norm_layer.bias.requires_grad_(True)
                 #norm_layer.training = True
             self.set_named_submodule(self.model, name, norm_layer)
+        params, param_names = self.collect_params(self.model)
+        if len(param_names) != 0:
+            self.optimizer = self.setup_optimizer(params,self.cfg)
 
     def revert_bn(self):
         normlayer_names = []
@@ -134,7 +134,9 @@ class TENT(TTA_BASE):
             norm_layer.bias.requires_grad_(True)
                 #norm_layer.training = True
             self.set_named_submodule(self.model, name, norm_layer)
-
+        params, param_names = self.collect_params(self.model)
+        if len(param_names) != 0:
+            self.optimizer = self.setup_optimizer(params,self.cfg)
     
     @staticmethod
     def get_named_submodule(model, sub_name):
@@ -159,5 +161,3 @@ class TENT(TTA_BASE):
 
 
 
-        
-        

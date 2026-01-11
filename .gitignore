@@ -1,0 +1,68 @@
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.dist-info/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Jupyter / notebooks ---
+.ipynb_checkpoints/
+*.ipynb
+Notebooks/
+
+# --- Datasets / large arrays ---
+corrupted_data/
+data/**/raw/
+data/**/processed/
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.mat
+
+# --- Model checkpoints / weights ---
+*.pt
+*.pth
+*.pth.tar
+*.ckpt
+*.onnx
+# --- Results / outputs ---
+results/
+results_*
+results_*/
+results_pseudo/
+output/
+eval_results/
+ckpt/
+
+# --- Logs ---
+*.log
+log.txt
+logs/
+
+# --- Large artifacts / archives ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# --- Media / figures (often large) ---
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

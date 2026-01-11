@@ -10,7 +10,7 @@ for attack in "${attacks[@]}"; do
   for tta_algorithm in "${tta_algorithms[@]}"; do
     for severity in "${severities[@]}"; do
       # Run the Python script with the current combination of arguments
-      python3 main.py --attack "$attack" --tta "$tta_algorithm" --severity "$severity" --batch_size 200 --gpu_id 1 --dataset cifar100c
+      python3 main.py --attack "$attack" --tta "$tta_algorithm" --severity "$severity" --batch_size 200 --gpu_id 1 --dataset cifar10c
     done
   done
 done

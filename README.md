@@ -10,10 +10,10 @@ This repo runs TTA on corrupted datasets (CIFAR-10-C / CIFAR-100-C / ImageNet-C)
 
 ## What’s inside
 
-- **TTA algorithms** (see `tta_algo/`): `tent`, `eata`, `sar`, `sotta`, `rotta`, `note`, `cotta`
+- **TTA algorithms** (see `tta_algo/`): `tent`, `eata`, `sar`, `sotta`, `note`, `cotta`
 - **Attacks** (see `tta_attack/`):
   - `dia`: gradient-based batch poisoning (cross-entropy on benign samples)
-  - `fca`: feature-based batch poisoning (formerly `u_dia`)
+  - `fca`: feature-based batch poisoning
 
 ## Citation
 
@@ -94,7 +94,6 @@ All runs go through `main.py`.
 - `--severity`: corruption severity (1–5)
 - `--batch_size`: batch size used for evaluation
 - `--gpu_id`: CUDA device id (if available)
-- `--model`: ImageNet model selector used in `main.py` for `imagenetc` (e.g. `SWin_b`, `SWin_l`, `ViT_b`, `ViT_l`)
 
 ### Examples
 
@@ -125,6 +124,3 @@ Defaults live in `config/conf.py`. Key knobs:
 - `cfg.DIA.EPS`, `cfg.DIA.ALPHA`, `cfg.DIA.STEPS`: attack strength/iterations
 - `cfg.DIA.ADV_MODEL`: whether the model expects inputs already normalized
 
-## Acknowledgements
-
-This project builds on prior work and tooling in the TTA and robustness ecosystem, including RobustBench, timm, and the CIFAR-C / ImageNet-C benchmarks.
